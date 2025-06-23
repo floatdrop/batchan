@@ -5,6 +5,14 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/floatdrop/batchan.svg)](https://pkg.go.dev/github.com/floatdrop/batchan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+A lightweight Go library for batching values from a channel with support for size-based and optional timeout-based flushing.
+
+## Features
+
+- Batch items from a channel based on size
+- Flush batches after a timeout, even if not full
+- Zero-dependency, idiomatic Go
+
 ## Installation
 
 ```bash
@@ -44,6 +52,10 @@ func main() {
 	// Got: [D E]
 }
 ```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 

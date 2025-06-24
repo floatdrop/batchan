@@ -30,7 +30,7 @@ func collectBatches[T any](out <-chan []T) [][]T {
 
 func TestBatchingFlushOnTimeout(t *testing.T) {
 	in := sendIntsToChan([]int{1, 2}, 150*time.Millisecond) // delay > timeout
-	out := batchan.New(in, 5, batchan.WithTimeout(100*time.Millisecond))
+	out := batchan.New(in, 5, batchan.WithTimeout[int](100*time.Millisecond))
 
 	got := collectBatches(out)
 
@@ -43,7 +43,7 @@ func TestBatchingFlushOnTimeout(t *testing.T) {
 
 func TestBatchingFlushOnSizeOrTimeout(t *testing.T) {
 	in := sendIntsToChan([]int{1, 2, 3, 4}, 50*time.Millisecond)
-	out := batchan.New(in, 2, batchan.WithTimeout(200*time.Millisecond))
+	out := batchan.New(in, 2, batchan.WithTimeout[int](200*time.Millisecond))
 
 	got := collectBatches(out)
 	expected := [][]int{{1, 2}, {3, 4}}
@@ -55,7 +55,7 @@ func TestBatchingFlushOnSizeOrTimeout(t *testing.T) {
 
 func TestFlushTimeoutMultiple(t *testing.T) {
 	in := sendIntsToChan([]int{1, 2, 3}, 300*time.Millisecond)
-	out := batchan.New(in, 10, batchan.WithTimeout(200*time.Millisecond)) // small timeout, large batch size
+	out := batchan.New(in, 10, batchan.WithTimeout[int](200*time.Millisecond)) // small timeout, large batch size
 
 	got := collectBatches(out)
 	expected := [][]int{{1}, {2}, {3}}
@@ -77,7 +77,7 @@ func TestTimeoutResetsAfterFlush(t *testing.T) {
 		in <- 3
 	}()
 
-	out := batchan.New(in, 2, batchan.WithTimeout(100*time.Millisecond))
+	out := batchan.New(in, 2, batchan.WithTimeout[int](100*time.Millisecond))
 
 	got := collectBatches(out)
 	expected := [][]int{{1}, {2}, {3}}
@@ -139,6 +139,18 @@ func TestBatchSizeLargerThanInput(t *testing.T) {
 	out := batchan.New(in, 5)
 
 	expected := [][]int{{42, 99}}
+	got := collectBatches(out)
+
+	if !reflect.DeepEqual(got, expected) {
+		t.Errorf("Expected %v, got %v", expected, got)
+	}
+}
+
+func TestSplitFunc(t *testing.T) {
+	in := sendIntsToChan([]int{1, 2, 3, 5, 6}, time.Microsecond)
+	out := batchan.New(in, 5, batchan.WithSplitFunc(func(i1, i2 int) bool { return i2-i1 > 1 }))
+
+	expected := [][]int{{1, 2, 3}, {5, 6}}
 	got := collectBatches(out)
 
 	if !reflect.DeepEqual(got, expected) {

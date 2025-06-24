@@ -2,17 +2,24 @@ package batchan
 
 import "time"
 
-type option func(*config)
+type option[T any] func(*config[T])
 
-type config struct {
+type config[T any] struct {
 	timeout    time.Duration
 	hasTimeout bool
+	splitFunc  func(T, T) bool
 }
 
-func WithTimeout(timeout time.Duration) option {
-	return func(cfg *config) {
+func WithTimeout[T any](timeout time.Duration) option[T] {
+	return func(cfg *config[T]) {
 		cfg.timeout = timeout
 		cfg.hasTimeout = true
+	}
+}
+
+func WithSplitFunc[T any](splitFunc func(T, T) bool) option[T] {
+	return func(cfg *config[T]) {
+		cfg.splitFunc = splitFunc
 	}
 }
 
@@ -23,8 +30,12 @@ func timerOrNil(t *time.Timer) <-chan time.Time {
 	return nil
 }
 
-func New[T any](in <-chan T, size int, opts ...option) <-chan []T {
-	cfg := &config{}
+func noSplitFunc[T any](t1, t2 T) bool { return false }
+
+func New[T any](in <-chan T, size int, opts ...option[T]) <-chan []T {
+	cfg := &config[T]{
+		splitFunc: noSplitFunc[T],
+	}
 
 	for _, opt := range opts {
 		opt(cfg)
@@ -63,11 +74,14 @@ func New[T any](in <-chan T, size int, opts ...option) <-chan []T {
 					return
 				}
 
+				if len(currentBatch) > 0 && cfg.splitFunc(currentBatch[len(currentBatch)-1], t) {
+					flush()
+				}
+
 				currentBatch = append(currentBatch, t)
 				if len(currentBatch) >= size {
 					flush()
 				}
-
 			case <-timerOrNil(timer):
 				flush()
 			}

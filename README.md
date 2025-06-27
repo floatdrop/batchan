@@ -11,6 +11,7 @@ A lightweight Go library for batching values from a channel with support for siz
 
 - Batch items from a channel based on size
 - Flush batches after a timeout, even if not full
+- Supports context cancellation with `WithContext` option
 - Zero-dependency, idiomatic Go
 
 ## Installation

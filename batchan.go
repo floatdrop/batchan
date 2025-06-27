@@ -1,28 +1,46 @@
 package batchan
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
-type option[T any] func(*config[T])
+// Option defines a configuration option for the batcher.
+type Option func(*config)
 
-type config[T any] struct {
-	timeout    time.Duration
-	hasTimeout bool
-	splitFunc  func(T, T) bool
+type config struct {
+	ctx              context.Context
+	timeout          time.Duration
+	hasTimeout       bool
+	outputBufferSize int
 }
 
-func WithTimeout[T any](timeout time.Duration) option[T] {
-	return func(cfg *config[T]) {
+// WithTimeout sets the maximum duration to wait before emitting a batch,
+// even if it hasn't reached the desired size.
+func WithTimeout(timeout time.Duration) Option {
+	return func(cfg *config) {
 		cfg.timeout = timeout
 		cfg.hasTimeout = true
 	}
 }
 
-func WithSplitFunc[T any](splitFunc func(T, T) bool) option[T] {
-	return func(cfg *config[T]) {
-		cfg.splitFunc = splitFunc
+// WithOutputBufferSize sets the size of the output channel buffer.
+// By default output channel is buffered with size 1.
+func WithOutputBufferSize(size int) Option {
+	return func(cfg *config) {
+		cfg.outputBufferSize = size
 	}
 }
 
+// WithContext sets a context for the batcher's lifetime. If the context
+// is canceled, the batching process will stop and flush any remaining items.
+func WithContext(ctx context.Context) Option {
+	return func(cfg *config) {
+		cfg.ctx = ctx
+	}
+}
+
+// timerOrNil returns the timer channel if the timer exists, or nil otherwise.
 func timerOrNil(t *time.Timer) <-chan time.Time {
 	if t != nil {
 		return t.C
@@ -30,24 +48,36 @@ func timerOrNil(t *time.Timer) <-chan time.Time {
 	return nil
 }
 
-func noSplitFunc[T any](t1, t2 T) bool { return false }
+// defaultSplitFunc is a default split function that never triggers a batch split.
+func defaultSplitFunc[T any](t1, t2 T) bool { return false }
 
-func New[T any](in <-chan T, size int, opts ...option[T]) <-chan []T {
-	cfg := &config[T]{
-		splitFunc: noSplitFunc[T],
+// New creates a batching channel that emits slices of type T.
+// A new batch is emitted when the batch reaches the specified size or the optional timeout expires.
+// Batching stops when the input channel is closed or the context is canceled.
+func New[T any](in <-chan T, size int, opts ...Option) <-chan []T {
+	return NewWithSplit(in, size, defaultSplitFunc, opts...)
+}
+
+// NewWithSplit creates a batching channel with an optional split function.
+// The splitFunc is called with the last item of the current batch and the next item;
+// if it returns true, the current batch is flushed before adding the new item.
+func NewWithSplit[T any](in <-chan T, size int, splitFunc func(T, T) bool, opts ...Option) <-chan []T {
+	cfg := &config{
+		ctx:              context.Background(),
+		outputBufferSize: 1,
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	out := make(chan []T)
+	out := make(chan []T, cfg.outputBufferSize)
 
 	go func() {
 		defer close(out)
 
 		var (
-			currentBatch []T
+			currentBatch []T = make([]T, 0, size)
 			timer        *time.Timer
 		)
 
@@ -59,7 +89,7 @@ func New[T any](in <-chan T, size int, opts ...option[T]) <-chan []T {
 		flush := func() {
 			if len(currentBatch) > 0 {
 				out <- currentBatch
-				currentBatch = nil
+				currentBatch = make([]T, 0, size)
 			}
 			if cfg.hasTimeout {
 				timer.Reset(cfg.timeout)
@@ -68,13 +98,16 @@ func New[T any](in <-chan T, size int, opts ...option[T]) <-chan []T {
 
 		for {
 			select {
+			case <-cfg.ctx.Done():
+				flush()
+				return
 			case t, ok := <-in:
 				if !ok {
 					flush()
 					return
 				}
 
-				if len(currentBatch) > 0 && cfg.splitFunc(currentBatch[len(currentBatch)-1], t) {
+				if len(currentBatch) > 0 && splitFunc(currentBatch[len(currentBatch)-1], t) {
 					flush()
 				}
 
